@@ -1,0 +1,558 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale="1.0">
+  <title>Game Theory Simulator</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans&display=swap" rel="stylesheet">
+    <style>
+    .matrix-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    svg text {
+      fill: black !important;
+      font-family: 'Noto Sans', sans-serif;
+    }
+    .cell-description {
+      margin-top: 0.5rem;
+      font-size: 12px;
+      color: #333;
+    }
+    .cell-description.highlight {
+      font-weight: bold;
+      color: #d32f2f;
+    }
+  </style>
+</head>
+<body>
+  <div class="container mt-5">
+    <h1 class="text-center">Game Theory Simulator</h1>
+    <p class="text-center">Select a classic game, play with private strategy choices, and analyze outcomes.</p>
+
+    <div class="row justify-content-center mb-4">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h3 class="card-title">1. Select a Game</h3>
+            <select id="scenarioSelect" class="form-select mb-3">
+              <option value="" selected>Choose a game type</option>
+              <option value="prisoners-dilemma">Prisoner's Dilemma</option>
+              <option value="coordination">Coordination Game</option>
+              <option value="stag-hunt">Stag Hunt</option>
+              <option value="battle-sexes">Battle of the Sexes</option>
+              <option value="matching-pennies">Matching Pennies</option>
+              <option value="hawk-dove">Hawk-Dove (Chicken)</option>
+              <option value="zero-sum">Pure Conflict Game (Zero-Sum)</option>
+            </select>
+            <p class="text-muted">Select a game to view its payoff matrix and play.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row justify-content-center mb-4">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h3 class="card-title">2. Payoff Matrix</h3>
+            <div id="payoffDisplay" class="matrix-container"></div>
+            <div id="payoffDescriptions" class="cell-description"></div>
+            <div id="backgroundDescription" class="text-muted"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row justify-content-center">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h3 class="card-title">3. Play the Game</h3>
+            <div id="player1Section">
+              <h4>Player 1: Choose Strategy</h4>
+              <select id="player1" class="form-select mb-3">
+                <option value="" disabled selected>Select a strategy...</option>
+              </select>
+              <button id="player1Submit" class="btn btn-primary w-100 mb-3">Submit</button>
+            </div>
+            <div id="player2Section" class="d-none">
+              <h4>Player 2: Choose Strategy</h4>
+              <select id="player2" class="form-select mb-3">
+                <option value="" disabled selected>Select a strategy...</option>
+              </select>
+              <button id="player2Submit" class="btn btn-primary w-100 mb-3">Submit</button>
+            </div>
+            <div id="switchPlayer" class="d-none text-center">
+              <h4>Switch to Player 2</h4>
+              <p>Player 1 has submitted their choice. Click to proceed.</p>
+              <button id="proceedToPlayer2" class="btn btn-info">Proceed</button>
+            </div>
+            <div id="resultSection" class="d-none">
+              <h4>Result</h4>
+              <p id="result" class="alert alert-info"></p>
+            </div>
+            <div id="analysis" class="mt-3 d-none">
+              <h4>Game Analysis</h4>
+              <div id="analysisContent"></div>
+            </div>
+            <h4 id="payoffMatrixTitle" class="d-none">Current Payoff Matrix</h4>
+            <div id="payoffMatrix" class="matrix-container"></div>
+            <div id="resultDescriptions" class="cell-description"></div>
+            <button id="resetGame" class="btn btn-warning w-100 mt-3 d-none">Play Again</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Game state
+    let payoffs = null;
+    let player1Choice = null;
+    let gameState = 'player1';
+    let currentGameId = null;
+    let currentStrategies = null;
+
+    // Scenarios with descriptions, strategies, payoffs, equilibria, and cell descriptions
+    const scenarios = {
+      'prisoners-dilemma': {
+        name: "Prisoner's Dilemma",
+        backgroundDescription: "Two prisoners are interrogated separately and must decide whether to confess (Defect) or stay silent (Cooperate). Confessing implicates the other, reducing one’s sentence but risking mutual betrayal. Payoffs represent years in prison: e.g., (3,3) means both get 3 years, (0,5) means the cooperator gets 0 years (freed) and the defector gets 5 years.",
+        resultDescription: "Both players defect (D, D) is the only Nash equilibrium. Defecting is dominant: no player can improve their payoff by unilaterally switching strategies.",
+        strategies: ["Cooperate", "Defect"],
+        strategyLabels: { row: ["C", "D"], col: ["C", "D"] },
+        payoffs: {
+          'Cooperate-Cooperate': [3, 3],
+          'Cooperate-Defect': [0, 5],
+          'Defect-Cooperate': [5, 0],
+          'Defect-Defect': [1, 1]
+        },
+        equilibria: ['Defect-Defect'],
+        cellDescriptions: {
+          'Cooperate-Cooperate': 'Both cooperate, sharing 3 years each.',
+          'Cooperate-Defect': 'P1 cooperates, P2 defects: P1 freed, P2 gets 5 years.',
+          'Defect-Cooperate': 'P1 defects, P2 cooperates: P1 gets 5 years, P2 freed.',
+          'Defect-Defect': 'Both defect, each gets 1 year.'
+        }
+      },
+      'coordination': {
+        name: "Coordination Game",
+        backgroundDescription: "Two players must choose between two locations (Left or Right) to meet, preferring to coordinate on the same choice. Payoffs represent utility points from successful coordination: e.g., (2,2) means both get 2 points for meeting at Left, (1,1) means 1 point each for Right, (0,0) means no points if they miscoordinate.",
+        resultDescription: "Two players want to coordinate their strategies to maximize payoffs. Both (L, L) and (R, R) are Nash equilibria, depending on mutual expectations.",
+        strategies: ["Left", "Right"],
+        strategyLabels: { row: ["L", "R"], col: ["L", "R"] },
+        payoffs: {
+          'Left-Left': [2, 2],
+          'Left-Right': [0, 0],
+          'Right-Left': [0, 0],
+          'Right-Right': [1, 1]
+        },
+        equilibria: ['Left-Left', 'Right-Right'],
+        cellDescriptions: {
+          'Left-Left': 'Both meet at Left, earning 2 points each.',
+          'Left-Right': 'P1 at Left, P2 at Right: no meeting, 0 points.',
+          'Right-Left': 'P1 at Right, P2 at Left: no meeting, 0 points.',
+          'Right-Right': 'Both meet at Right, earning 1 point each.'
+        }
+      },
+      'stag-hunt': {
+        name: "Stag Hunt",
+        backgroundDescription: "Two hunters decide whether to hunt a stag together (requiring cooperation) or a hare alone (safer but less rewarding). Payoffs represent food units: e.g., (4,4) means both get 4 units from a stag, (3,3) means 3 units each from hares, (0,3) means the stag hunter gets nothing while the hare hunter gets 3 units.",
+        resultDescription: "Players benefit most when both choose Stag (S, S), but if one hunts Hare, the other is better off doing the same. Two Nash equilibria: (S, S) (risk-dominant) and (H, H) (safe).",
+        strategies: ["Stag", "Hare"],
+        strategyLabels: { row: ["S", "H"], col: ["S", "H"] },
+        payoffs: {
+          'Stag-Stag': [4, 4],
+          'Stag-Hare': [0, 3],
+          'Hare-Stag': [3, 0],
+          'Hare-Hare': [3, 3]
+        },
+        equilibria: ['Stag-Stag', 'Hare-Hare'],
+        cellDescriptions: {
+          'Stag-Stag': 'Both hunt stag, sharing 4 units each.',
+          'Stag-Hare': 'P1 hunts stag, P2 hunts hare: P1 gets 0, P2 gets 3.',
+          'Hare-Stag': 'P1 hunts hare, P2 hunts stag: P1 gets 3, P2 gets 0.',
+          'Hare-Hare': 'Both hunt hare, each gets 3 units.'
+        }
+      },
+      'battle-sexes': {
+        name: "Battle of the Sexes",
+        backgroundDescription: "A couple decides whether to attend ballet or football, each preferring one event but valuing being together. Payoffs represent satisfaction levels: e.g., (2,1) means Player 1 gets 2 (prefers ballet) and Player 2 gets 1 (less preferred), (0,0) means no satisfaction if they attend different events.",
+        resultDescription: "Players have differing preferences but prefer coordination over miscoordination. Two pure-strategy Nash equilibria: (B, B) and (F, F). One mixed-strategy Nash equilibrium exists where each player chooses their less preferred option with a probability.",
+        strategies: ["Ballet", "Football"],
+        strategyLabels: { row: ["B", "F"], col: ["B", "F"] },
+        payoffs: {
+          'Ballet-Ballet': [2, 1],
+          'Ballet-Football': [0, 0],
+          'Football-Ballet': [0, 0],
+          'Football-Football': [1, 2]
+        },
+        equilibria: ['Ballet-Ballet', 'Football-Football'],
+        mixed: "Mixed strategy: Each player chooses their less preferred option with a probability.",
+        cellDescriptions: {
+          'Ballet-Ballet': 'Both attend ballet: P1 gets 2, P2 gets 1.',
+          'Ballet-Football': 'P1 at ballet, P2 at football: no satisfaction.',
+          'Football-Ballet': 'P1 at football, P2 at ballet: no satisfaction.',
+          'Football-Football': 'Both attend football: P1 gets 1, P2 gets 2.'
+        }
+      },
+      'matching-pennies': {
+        name: "Matching Pennies",
+        backgroundDescription: "Two players simultaneously choose Heads or Tails, with one aiming to match and the other to mismatch. Payoffs represent points: e.g., (1,-1) means Player 1 wins 1 point (matcher wins) and Player 2 loses 1 point, (-1,1) means Player 2 wins and Player 1 loses.",
+        resultDescription: "A zero-sum game where one player’s gain is the other’s loss. No pure-strategy Nash equilibrium exists. Mixed-strategy Nash equilibrium: Each player plays H and T with a 50% probability.",
+        strategies: ["Heads", "Tails"],
+        strategyLabels: { row: ["H", "T"], col: ["H", "T"] },
+        payoffs: {
+          'Heads-Heads': [1, -1],
+          'Heads-Tails': [-1, 1],
+          'Tails-Heads': [-1, 1],
+          'Tails-Tails': [1, -1]
+        },
+        equilibria: [],
+        mixed: "Mixed strategy: Each player plays H and T with a 50% probability.",
+        cellDescriptions: {
+          'Heads-Heads': 'Both choose Heads: P1 wins 1, P2 loses 1.',
+          'Heads-Tails': 'P1 Heads, P2 Tails: P1 loses 1, P2 wins 1.',
+          'Tails-Heads': 'P1 Tails, P2 Heads: P1 loses 1, P2 wins 1.',
+          'Tails-Tails': 'Both choose Tails: P1 wins 1, P2 loses 1.'
+        }
+      },
+      'hawk-dove': {
+        name: "Hawk-Dove (Chicken)",
+        backgroundDescription: "Two animals compete for a resource, choosing to fight aggressively (Hawk) or share peacefully (Dove). Payoffs represent resource gains or costs: e.g., (-1,-1) means both lose 1 unit due to injury, (3,0) means Hawk gets 3 units and Dove gets none, (2,2) means both share 2 units.",
+        resultDescription: "Players prefer to avoid mutual aggression (H, H). Two pure-strategy Nash equilibria: (H, D) and (D, H). One mixed-strategy Nash equilibrium exists where players randomize between Hawk and Dove with calculated probabilities.",
+        strategies: ["Hawk", "Dove"],
+        strategyLabels: { row: ["H", "D"], col: ["H", "D"] },
+        payoffs: {
+          'Hawk-Hawk': [-1, -1],
+          'Hawk-Dove': [3, 0],
+          'Dove-Hawk': [0, 3],
+          'Dove-Dove': [2, 2]
+        },
+        equilibria: ['Hawk-Dove', 'Dove-Hawk'],
+        mixed: "Mixed strategy: Players randomize between Hawk and Dove with calculated probabilities.",
+        cellDescriptions: {
+          'Hawk-Hawk': 'Both fight: each loses 1 unit.',
+          'Hawk-Dove': 'P1 fights, P2 shares: P1 gets 3, P2 gets 0.',
+          'Dove-Hawk': 'P1 shares, P2 fights: P1 gets 0, P2 gets 3.',
+          'Dove-Dove': 'Both share: each gets 2 units.'
+        }
+      },
+      'zero-sum': {
+        name: "Pure Conflict Game (Zero-Sum)",
+        backgroundDescription: "Two players choose between two strategies in a zero-sum conflict, where one’s gain is the other’s loss. Payoffs represent points: e.g., (1,-1) means Player 1 gains 1 point and Player 2 loses 1 point, (-1,1) means Player 2 gains and Player 1 loses.",
+        resultDescription: "Similar to Matching Pennies, it’s a zero-sum game. Players randomize their strategies in a mixed strategy Nash equilibrium.",
+        strategies: ["Strategy 0", "Strategy 1"],
+        strategyLabels: { row: ["0", "1"], col: ["0", "1"] },
+        payoffs: {
+          'Strategy 0-Strategy 0': [0, 0],
+          'Strategy 0-Strategy 1': [1, -1],
+          'Strategy 1-Strategy 0': [-1, 1],
+          'Strategy 1-Strategy 1': [0, 0]
+        },
+        equilibria: [],
+        mixed: "Mixed strategy: Randomization between strategies.",
+        cellDescriptions: {
+          'Strategy 0-Strategy 0': 'Both choose Strategy 0: no gain or loss.',
+          'Strategy 0-Strategy 1': 'P1 chooses 0, P2 chooses 1: P1 wins 1, P2 loses 1.',
+          'Strategy 1-Strategy 0': 'P1 chooses 1, P2 chooses 0: P1 loses 1, P2 wins 1.',
+          'Strategy 1-Strategy 1': 'Both choose Strategy 1: no gain or loss.'
+        }
+      }
+    };
+
+    // Function to calculate outcome
+    function calculateOutcome(player1, player2) {
+      const key = player1 + '-' + player2;
+      return payoffs[key] || [0, 0];
+    }
+
+    // Function to find Nash equilibrium
+    function findNashEquilibrium() {
+      return scenarios[currentGameId].equilibria || [];
+    }
+
+    // Function to check if outcome is a Nash Equilibrium
+    function isNashEquilibrium(player1Choice, player2Choice) {
+      const outcomeKey = player1Choice + '-' + player2Choice;
+      const equilibria = findNashEquilibrium();
+      return equilibria.includes(outcomeKey);
+    }
+
+    // Function to update strategy selectors
+    function updateStrategySelectors() {
+      const player1Select = document.querySelector('#player1');
+      const player2Select = document.querySelector('#player2');
+      player1Select.innerHTML = `<option value="" disabled selected>Select a strategy...</option>`;
+      player2Select.innerHTML = `<option value="" disabled selected>Select a strategy...</option>`;
+      if (currentStrategies) {
+        currentStrategies.forEach(strategy => {
+          const option1 = document.createElement('option');
+          option1.value = strategy;
+          option1.text = strategy;
+          player1Select.appendChild(option1);
+          const option2 = document.createElement('option');
+          option2.value = strategy;
+          option2.text = strategy;
+          player2Select.appendChild(option2);
+        });
+      }
+    }
+
+    // Function to draw payoff matrix and descriptions
+    function drawPayoffMatrix(containerId, selectedStrategies = [], showPayoffs = true, highlightKey = null) {
+      d3.select(`#${containerId}`).selectAll('*').remove();
+      const descriptionId = containerId === 'payoffDisplay' ? 'payoffDescriptions' : 'resultDescriptions';
+      d3.select(`#${descriptionId}`).selectAll('*').remove();
+
+      const scenario = scenarios[currentGameId];
+      if (!scenario) return;
+
+      const cellSize = 120; // 120x120 cells
+      const margin = { top: 50, left: 50 };
+      const width = cellSize * 2;
+      const height = cellSize * 2;
+      const svg = d3.select(`#${containerId}`)
+        .append('svg')
+        .attr('width', width + margin.left + margin.right)
+        .attr('height', height + margin.top)
+        .append('g')
+        .attr('transform', `translate(${margin.left}, ${margin.top})`);
+
+      // Row labels
+      svg.selectAll('.row-label')
+        .data(scenario.strategyLabels.row)
+        .enter()
+        .append('text')
+        .attr('x', (d, i) => i * cellSize + cellSize / 2)
+        .attr('y', -10)
+        .attr('text-anchor', 'middle')
+        .text(d => d);
+
+      // Column labels
+      svg.selectAll('.col-label')
+        .data(scenario.strategyLabels.col)
+        .enter()
+        .append('text')
+        .attr('x', -10)
+        .attr('y', (d, i) => i * cellSize + cellSize / 2)
+        .attr('text-anchor', 'end')
+        .attr('dominant-baseline', 'middle')
+        .text(d => d);
+
+      // Grid cells
+      const cells = svg.selectAll('.cell')
+        .data([
+          { row: 0, col: 0, payoff: payoffs[`${scenario.strategies[0]}-${scenario.strategies[0]}`], key: `${scenario.strategies[0]}-${scenario.strategies[0]}` },
+          { row: 0, col: 1, payoff: payoffs[`${scenario.strategies[0]}-${scenario.strategies[1]}`], key: `${scenario.strategies[0]}-${scenario.strategies[1]}` },
+          { row: 1, col: 0, payoff: payoffs[`${scenario.strategies[1]}-${scenario.strategies[0]}`], key: `${scenario.strategies[1]}-${scenario.strategies[0]}` },
+          { row: 1, col: 1, payoff: payoffs[`${scenario.strategies[1]}-${scenario.strategies[1]}`], key: `${scenario.strategies[1]}-${scenario.strategies[1]}` }
+        ])
+        .enter()
+        .append('g')
+        .attr('transform', d => `translate(${d.col * cellSize}, ${d.row * cellSize})`);
+
+      cells.append('rect')
+        .attr('width', cellSize)
+        .attr('height', cellSize)
+        .attr('fill', '#f0f0f0')
+        .attr('stroke', '#000');
+
+      cells.append('text')
+        .attr('x', cellSize / 2)
+        .attr('y', cellSize / 2)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('font-size', '14')
+        .text(d => showPayoffs ? `(${d.payoff[0]}, ${d.payoff[1]})` : '');
+
+      // Highlight selected strategies
+      if (selectedStrategies.length === 2) {
+        const rowIdx = scenario.strategies.indexOf(selectedStrategies[0]);
+        const colIdx = scenario.strategies.indexOf(selectedStrategies[1]);
+        svg.append('rect')
+          .attr('x', colIdx * cellSize)
+          .attr('y', rowIdx * cellSize)
+          .attr('width', cellSize)
+          .attr('height', cellSize)
+          .attr('fill', 'none')
+          .attr('stroke', 'red')
+          .attr('stroke-width', 2);
+      }
+
+      // Add cell descriptions
+      const descDiv = d3.select(`#${descriptionId}`);
+      cells.each(function(d) {
+        const desc = scenario.cellDescriptions[d.key] || 'No description available.';
+        descDiv.append('p')
+          .attr('class', `cell-description ${highlightKey === d.key ? 'highlight' : ''}`)
+          .text(`(${d.payoff[0]}, ${d.payoff[1]}): ${desc}`);
+      });
+    }
+
+    // Function to update background description
+    function updateBackgroundDescription() {
+      const descDiv = document.getElementById('backgroundDescription');
+      if (currentGameId && scenarios[currentGameId]) {
+        descDiv.innerHTML = `<p><strong>Background:</strong> ${scenarios[currentGameId].backgroundDescription}</p>`;
+      } else {
+        descDiv.innerHTML = '';
+      }
+    }
+
+    // Function to reset game
+    function resetGame() {
+      player1Choice = null;
+      gameState = 'player1';
+      document.getElementById('player1Section').classList.remove('d-none');
+      document.getElementById('player2Section').classList.add('d-none');
+      document.getElementById('switchPlayer').classList.add('d-none');
+      document.getElementById('resultSection').classList.add('d-none');
+      document.getElementById('analysis').classList.add('d-none');
+      document.getElementById('payoffMatrixTitle').classList.add('d-none');
+      document.getElementById('payoffMatrix').classList.add('d-none');
+      document.getElementById('resultDescriptions').innerHTML = '';
+      document.getElementById('resetGame').classList.add('d-none');
+      document.getElementById('player1').value = '';
+      document.getElementById('player2').value = '';
+      drawPayoffMatrix('payoffDisplay');
+      updateBackgroundDescription();
+    }
+
+    // Event listeners
+    document.querySelector('#scenarioSelect').addEventListener('change', (e) => {
+      currentGameId = e.target.value;
+      if (currentGameId) {
+        payoffs = scenarios[currentGameId].payoffs;
+        currentStrategies = scenarios[currentGameId].strategies;
+        updateStrategySelectors();
+        drawPayoffMatrix('payoffDisplay');
+        updateBackgroundDescription();
+        resetGame();
+      } else {
+        document.getElementById('payoffDisplay').innerHTML = '';
+        document.getElementById('payoffDescriptions').innerHTML = '';
+        document.getElementById('backgroundDescription').innerHTML = '';
+      }
+    });
+
+    document.querySelector('#player1Submit').addEventListener('click', () => {
+      player1Choice = document.querySelector('#player1').value;
+      if (!player1Choice) {
+        alert('Please select a strategy.');
+        return;
+      }
+      gameState = 'switching';
+      document.getElementById('player1Section').classList.add('d-none');
+      document.getElementById('switchPlayer').classList.remove('d-none');
+    });
+
+    document.querySelector('#proceedToPlayer2').addEventListener('click', () => {
+      gameState = 'player2';
+      document.getElementById('switchPlayer').classList.add('d-none');
+      document.getElementById('player2Section').classList.remove('d-none');
+    });
+
+    document.querySelector('#player2Submit').addEventListener('click', () => {
+      const player2Choice = document.querySelector('#player2').value;
+      if (!player2Choice) {
+        alert('Please select a strategy.');
+        return;
+      }
+      gameState = 'result';
+      const outcome = calculateOutcome(player1Choice, player2Choice);
+      const scenario = scenarios[currentGameId];
+
+      // Check Nash Equilibrium
+      const isNash = isNashEquilibrium(player1Choice, player2Choice);
+      const nashMessage = isNash
+        ? `This outcome (${player1Choice}, ${player2Choice}) is a Nash Equilibrium.`
+        : `This outcome (${player1Choice}, ${player2Choice}) is not a Nash Equilibrium.${
+            scenario.equilibria.length === 0 && scenario.mixed
+              ? ` This game has no pure-strategy Nash equilibria, but a mixed-strategy equilibrium exists: ${scenario.mixed}`
+              : ''
+          }`;
+
+      // Show result
+      document.getElementById('result').innerHTML = `
+        <strong>Player 1:</strong> ${player1Choice}<br>
+        <strong>Player 2:</strong> ${player2Choice}<br>
+        <strong>Payoffs:</strong> (${outcome[0]}, ${outcome[1]})<br>
+        <strong>Nash Equilibrium Check:</strong> ${nashMessage}
+      `;
+      document.getElementById('resultSection').classList.remove('d-none');
+
+      // Show analysis
+      const equilibria = findNashEquilibrium();
+      const analysisContent = document.getElementById('analysisContent');
+      analysisContent.innerHTML = `
+        <p><strong>Background:</strong> ${scenario.backgroundDescription}</p>
+        <p><strong>Outcome Analysis:</strong> The chosen strategies (${player1Choice}, ${player2Choice}) yield payoffs (${outcome[0]}, ${outcome[1]}). ${nashMessage}</p>
+        <p><strong>Game Description:</strong> ${scenario.resultDescription}</p>
+        <p><strong>Pure-Strategy Nash Equilibria:</strong> ${equilibria.length ? equilibria.join(', ') : 'None'}</p>
+        ${scenario.mixed ? `<p><strong>Mixed-Strategy Nash Equilibrium:</strong> ${scenario.mixed}</p>` : ''}
+      `;
+      document.getElementById('analysis').style.display = 'block';
+      document.getElementById('analysis').classList.remove('d-none');
+
+      // Show current payoff matrix with highlight
+      document.getElementById('payoffMatrixTitle').classList.remove('d-none');
+      drawPayoffMatrix('payoffMatrix', [player1Choice, player2Choice], true, `${player1Choice}-${player2Choice}`);
+      document.getElementById('payoffMatrix').classList.remove('d-none');
+
+      document.getElementById('player2Section').classList.add('d-none');
+      document.getElementById('resetGame').classList.remove('d-none');
+    });
+
+    document.querySelector('#resetGame').addEventListener('click', resetGame);
+
+    // Initial setup
+    drawPayoffMatrix('payoffDisplay');
+    updateBackgroundDescription();
+  </script>
+</body>
+</html>
