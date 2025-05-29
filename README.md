@@ -2,7 +2,7 @@
 A web-based tool for teaching game theory, featuring classic 2x2 games (e.g., Prisoner’s Dilemma). Built with HTML, JavaScript, and Bootstrap.
 
 ## Demo
-Live demo: https://yourusername.github.io/game-theory-simulator
+Live demo: https://phoenixlun.github.io/game-theory-simulator
 
 ## Features
 - Sequential play for seven 2x2 games.
